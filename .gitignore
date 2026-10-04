@@ -1,0 +1,6 @@
+*.exe
+config.json
+*.png
+*.log
+PROGRESS.md
+!docs/*.png
