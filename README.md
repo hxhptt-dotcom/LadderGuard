@@ -40,7 +40,7 @@
 
 托盘左键的状态面板（自带"这不是木马"说明，避免小白恐慌）：
 
-![状态面板](docs/status-panel.png)
+![状态面板](docs/status-panel-clean.png)
 
 ## 为什么是"系统代理 = 找死"
 
