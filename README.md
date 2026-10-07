@@ -42,6 +42,25 @@
 
 ![状态面板](docs/status-panel-clean.png)
 
+## 改了代理端口？零配置
+
+很多人会把 Clash Verge 的默认端口 7890 改成自己的，**完全不用改 LadderGuard 的任何配置**。
+识别顺序（全部失败才报警）：
+
+1. 上次验证过的端口（缓存在 state.json）
+2. Clash Verge 配置里的 `verge_mixed_port`（读 verge.yaml）
+3. config.json 的 `proxy_ports`（提示用途）
+4. 兜底：扫描代理核心进程监听的本地端口（mihomo / clash / sing-box / xray / v2ray / hysteria 等），
+   并逐个验证"真的能当 HTTP 代理用"（防止把核心的 API 端口误当代理）
+
+排查用命令：`LadderGuard-console.exe -ports`，直接打印识别到的端口和来源。
+
+## 实战案例：朋友改了默认端口，一直误报
+
+2026-10-04 真实案例：一位朋友把 Verge 默认端口改掉了，LadderGuard v1.1.0 只探测 7890/7897，
+于是连续弹"代理内核没在跑，梯子已断"的假警报（实际内核活得好好的）。
+v1.2.0 修复：端口自动识别 + 验证 + 缓存，改任何端口都不再误报。
+
 ## 为什么是"系统代理 = 找死"
 
 系统代理只是个"建议"，浏览器听，**AI 桌面客户端、命令行工具、Electron 应用
@@ -91,7 +110,7 @@ LadderGuard.exe -version               :: 看版本
 ```json
 {
   "interval_sec": 30,            // 检测间隔，最小 10
-  "proxy_ports": [7890, 7897],   // 本地代理端口探测列表
+  "proxy_ports": [7890, 7897],   // 优先探测的端口提示（改过端口不用改这里，自动识别）
   "expect_tun": true,            // 你不用 TUN 就改 false（但不建议）
   "warn_system_proxy": true,     // 开系统代理时要不要骂你
   "risky_regions": ["CN", "HK", "MO", "RU", "BY", "KP", "IR", "SY", "CU", "AF"],

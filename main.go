@@ -27,7 +27,7 @@ import (
 	"unsafe"
 )
 
-const Version = "1.1.0"
+const Version = "1.2.0"
 
 //go:embed icon_green.ico
 var icoGreenData []byte
@@ -376,6 +376,7 @@ type State struct {
 	IpChanges   []int64          `json:"ip_changes"`
 	LastAlert   map[string]int64 `json:"last_alert"`
 	FailStreak  int              `json:"fail_streak"`
+	ProxyPort   int              `json:"proxy_port"`
 }
 
 func exeDir() string {
@@ -414,7 +415,7 @@ func loadState() *State {
 		json.Unmarshal(b, st)
 	}
 	if st.LastAlert == nil {
-		st.LastAlert = map[string]int64{}
+		gState.LastAlert = map[string]int64{}
 	}
 	if st.IpChanges == nil {
 		st.IpChanges = []int64{}
@@ -595,9 +596,18 @@ func fetchRealIP(c *http.Client) (string, string) {
 	return "", ""
 }
 
+func runHiddenCmd(c *exec.Cmd) {
+	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+}
+
 func probePorts(ports []int) []int {
 	var alive []int
+	seen := map[int]bool{}
 	for _, p := range ports {
+		if p <= 0 || p > 65535 || seen[p] {
+			continue
+		}
+		seen[p] = true
 		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", p), 1200*time.Millisecond)
 		if err == nil {
 			c.Close()
@@ -605,6 +615,124 @@ func probePorts(ports []int) []int {
 		}
 	}
 	return alive
+}
+
+// detectAlivePorts 端口全自动识别：
+// 1) 上次验证过的缓存端口  2) verge.yaml 的 verge_mixed_port  3) 配置提示端口
+// 都不行才扫描代理核心进程监听的本地端口（mihomo/clash/sing-box/xray/v2ray 等）
+func detectAlivePorts(cfg *Config, vergePort string) ([]int, string) {
+	stateMu.Lock()
+	cached := gState.ProxyPort
+	stateMu.Unlock()
+	verge := 0
+	if v, err := strconv.Atoi(strings.TrimSpace(vergePort)); err == nil && v > 0 && v < 65536 {
+		verge = v
+	}
+	var first []int
+	if cached > 0 {
+		first = append(first, cached)
+	}
+	if verge > 0 {
+		first = append(first, verge)
+	}
+	first = append(first, cfg.ProxyPorts...)
+	alive := probePorts(first)
+	if len(alive) > 0 {
+		switch alive[0] {
+		case cached:
+			return alive, "缓存"
+		case verge:
+			return alive, "verge.yaml"
+		}
+		return alive, "配置端口"
+	}
+	// 兜底：扫描核心进程监听的端口
+	extra := probePorts(coreListeningPorts())
+	if len(extra) == 0 {
+		return nil, ""
+	}
+	// 逐个验证真的能当 HTTP 代理用（防止把核心的 API 端口之类误当代理）
+	var ok, bad []int
+	for _, p := range extra {
+		if validateProxyPort(p) {
+			ok = append(ok, p)
+		} else {
+			bad = append(bad, p)
+		}
+	}
+	if len(ok) > 0 {
+		return append(ok, bad...), "进程扫描"
+	}
+	return extra, "进程扫描"
+}
+
+func validateProxyPort(p int) bool {
+	c := clientViaProxy(p)
+	c.Timeout = 8 * time.Second
+	resp, err := c.Get("http://www.gstatic.com/generate_204")
+	if err != nil {
+		return false
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 16))
+	resp.Body.Close()
+	// 走通代理的 204；核心 API 端口会返回 404/401 之类，借此排除
+	return resp.StatusCode == 200 || resp.StatusCode == 204
+}
+
+var reCoreProcName = regexp.MustCompile(`(?i)mihomo|clash|sing-box|xray|v2ray|hysteria|trojan|naive|brook`)
+
+func coreListeningPorts() []int {
+	pids := map[string]bool{}
+	out, err := exec.Command("tasklist", "/FO", "CSV", "/NH").Output()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || !reCoreProcName.MatchString(line) {
+				continue
+			}
+			f := strings.Split(line, ",")
+			if len(f) < 2 {
+				continue
+			}
+			pid := strings.Trim(f[1], `" `)
+			if pid != "" {
+				pids[pid] = true
+			}
+		}
+	}
+	if len(pids) == 0 {
+		return nil
+	}
+	out2, err := exec.Command("netstat", "-ano", "-p", "tcp").Output()
+	if err != nil {
+		return nil
+	}
+	seen := map[int]bool{}
+	var ports []int
+	for _, line := range strings.Split(string(out2), "\n") {
+		if !strings.Contains(line, "LISTENING") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 5 {
+			continue
+		}
+		if !pids[f[len(f)-1]] {
+			continue
+		}
+		local := f[1]
+		i := strings.LastIndex(local, ":")
+		if i < 0 {
+			continue
+		}
+		p, err := strconv.Atoi(local[i+1:])
+		if err != nil || p <= 0 || p > 65535 || seen[p] {
+			continue
+		}
+		seen[p] = true
+		ports = append(ports, p)
+	}
+	return ports
 }
 
 var reTunName = regexp.MustCompile(`(?i)meta|mihomo|clash|verge|wintun|sing-?box|^tun|tun$`)
@@ -707,6 +835,7 @@ type Snap struct {
 	SysProxyOn     bool
 	SysProxySrv    string
 	AlivePorts     []int
+	PortSource     string
 	TunFound       bool
 	TunName        string
 	DefaultExit    Geo
@@ -721,9 +850,14 @@ type Snap struct {
 func runChecks(cfg *Config) *Snap {
 	s := &Snap{}
 	s.SysProxyOn, s.SysProxySrv = readSystemProxy()
-	s.AlivePorts = probePorts(cfg.ProxyPorts)
-	s.TunFound, s.TunName = detectTunIface()
 	s.Verge = readVergeYaml()
+	s.AlivePorts, s.PortSource = detectAlivePorts(cfg, s.Verge.MixedPort)
+	if len(s.AlivePorts) > 0 && gState != nil {
+		stateMu.Lock()
+		gState.ProxyPort = s.AlivePorts[0]
+		stateMu.Unlock()
+	}
+	s.TunFound, s.TunName = detectTunIface()
 
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -799,8 +933,8 @@ func evaluate(s *Snap, cfg *Config, st *State) []Issue {
 	if !coreAlive {
 		tryAdd(Issue{Level: 2, Key: "core-dead", Tag: "内核",
 			Title:  "代理内核没在跑，梯子已断",
-			Detail: fmt.Sprintf("本地端口 %v 全部不通，Clash Verge 可能没启动或内核挂了，现在所有流量都在直连。", cfg.ProxyPorts),
-			Fix:    "打开 Clash Verge 确认主开关已开；不行就重启它；再不行看日志目录里的报错。"}, cd)
+			Detail: "配置端口和自动识别（verge.yaml / 代理核心进程监听端口）都没找到可用端口，Clash Verge 可能没启动或内核挂了，现在所有流量都在直连。",
+			Fix:    "打开 Clash Verge 确认主开关已开；不行就重启它。改过代理端口也不用配置，本工具会自动识别。"}, cd)
 	} else if cfg.ExpectTUN && !s.TunFound {
 		title := "TUN 模式没开，全机流量没人接管"
 		hint := ""
@@ -1889,7 +2023,9 @@ func installAutostart() error {
 		return fmt.Errorf("拿不到自身路径")
 	}
 	val := `"` + target + `"`
-	out, err := exec.Command("reg", "add", runKey, "/v", "LadderGuard", "/t", "REG_SZ", "/d", val, "/f").CombinedOutput()
+	cmd := exec.Command("reg", "add", runKey, "/v", "LadderGuard", "/t", "REG_SZ", "/d", val, "/f")
+	runHiddenCmd(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, out)
 	}
@@ -1897,7 +2033,9 @@ func installAutostart() error {
 }
 
 func uninstallAutostart() error {
-	out, err := exec.Command("reg", "delete", runKey, "/v", "LadderGuard", "/f").CombinedOutput()
+	cmd := exec.Command("reg", "delete", runKey, "/v", "LadderGuard", "/f")
+	runHiddenCmd(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, out)
 	}
@@ -1997,17 +2135,23 @@ func main() {
 		fmt.Printf("LadderGuard v%s\n", Version)
 	case "-diag":
 		attachConsole()
+		gState = loadState()
 		s := runChecks(&cfg)
-		st := loadState()
-		gState = st
 		stateMu.Lock()
-		st.LastAlert = map[string]int64{} // 诊断模式无视冷却，全量输出
+		gState.LastAlert = map[string]int64{} // 诊断模式无视冷却，全量输出
 		stateMu.Unlock()
-		issues := evaluate(s, &cfg, st)
+		issues := evaluate(s, &cfg, gState)
 		rep := buildReport(s, issues, &cfg)
 		SetClipboardText(rep)
 		fmt.Println(rep)
 		fmt.Println("── 诊断报告已复制到剪贴板 ──")
+	case "-ports":
+		attachConsole()
+		gState = loadState()
+		s := runChecks(&cfg)
+		fmt.Printf("识别到的代理端口: %v（来源: %s）\n", s.AlivePorts, orDash(s.PortSource))
+		fmt.Printf("默认出口: %s\n", geoText(s.DefaultExit))
+		fmt.Printf("代理出口: %s\n", geoText(s.ProxyExit))
 	case "-test":
 		runTestScenario(scenario)
 	case "-install-autostart":

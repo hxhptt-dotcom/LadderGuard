@@ -2,13 +2,13 @@
   "FixedFileInfo": {
     "FileVersion": {
       "Major": 1,
-      "Minor": 1,
+      "Minor": 2,
       "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 1,
-      "Minor": 1,
+      "Minor": 2,
       "Patch": 0,
       "Build": 0
     },
@@ -21,15 +21,15 @@
   "StringFileInfo": {
     "Comments": "",
     "CompanyName": "LadderGuard",
-    "FileDescription": "梯子卫士 - AI 冲浪防封号监控（右下角托盘图标，右键可退出）",
-    "FileVersion": "1.1.0.0",
+    "FileDescription": "梯子卫士 - AI 冲浪防封号监控（任意代理端口自动识别，托盘右键可退出）",
+    "FileVersion": "1.2.0.0",
     "InternalName": "ladderguard",
     "LegalCopyright": "MIT License",
     "LegalTrademarks": "",
     "OriginalFilename": "LadderGuard.exe",
     "PrivateBuild": "",
     "ProductName": "LadderGuard 梯子卫士",
-    "ProductVersion": "1.1.0.0",
+    "ProductVersion": "1.2.0.0",
     "SpecialBuild": ""
   },
   "IconPath": "icon_green.ico"
