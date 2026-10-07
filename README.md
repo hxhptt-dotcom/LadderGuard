@@ -14,6 +14,8 @@
 （Claude / ChatGPT / ZCode 都行），它一看就懂，马上给你修。
 
 > 一句话：**TUN 掉了它比 Claude 客服先知道。**
+> 
+> 💡 深度检测引擎基于开源项目 **[xykt/IPQuality](https://github.com/xykt/IPQuality)**，向原作者致敬与致谢！
 
 ---
 
@@ -189,6 +191,16 @@ LadderGuard.exe -uninstall-autostart
 taskkill /f /im LadderGuard.exe
 del LadderGuard.exe
 ```
+
+## 🙏 致谢与开源声明 (Credits & Acknowledgement)
+
+LadderGuard 的【全面体检（IP质量）】深度风控引擎底层基于开源项目 **[IPQuality](https://github.com/xykt/IPQuality)**（作者 **[@xykt](https://github.com/xykt)**）。
+
+- **开源项目地址**：[https://github.com/xykt/IPQuality](https://github.com/xykt/IPQuality)
+- **致谢与规范说明**：
+  - 本项目深度集成了 `xykt/IPQuality` 的优质检测逻辑，包括全球权威反欺诈库多源聚合（IPQS、Scamalytics、IP2Location、AbuseIPDB 等）、原生广播/数据中心机房特征识别、以及流媒体与主流 AI 服务的网络准入探测。
+  - LadderGuard 在其基础上构建了 Windows 本地原生常驻守护机制、Git Bash 运行时智能兼容与环境补充、自绘系统托盘与报警弹窗、大白话 Claude/GPT 防封研判算法、一键生成 AI 修复提示词、以及 Cyber Tactical 战术级现代前端可视化报告。
+  - **遵循开源规范，在此特别致敬并衷心感谢原作者 @xykt 对开源社区的卓越贡献！**
 
 ## 免责声明
 

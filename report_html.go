@@ -656,6 +656,8 @@ ChatGPT 专评：%s
           <span>·</span>
           <span class="meta-chip">{{COUNTRY}}</span>
           <span class="meta-chip">{{IP}}</span>
+          <span>·</span>
+          <a href="https://github.com/xykt/IPQuality" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: none; font-size: 11px; font-family: var(--font-mono); display: inline-flex; align-items: center; gap: 4px;">引擎: xykt/IPQuality</a>
         </div>
       </div>
     </div>
@@ -883,11 +885,18 @@ ChatGPT 专评：%s
         <span class="dot y"></span>
         <span class="dot g"></span>
       </div>
-      <span class="terminal-title">ladderguard // raw-telemetry-dump.log</span>
+      <span class="terminal-title">ladderguard // powered by xykt/IPQuality engine</span>
       <span class="terminal-toggle" id="terminalToggleBtn">[ 点击折叠 / 展开 90+ 项原始日志 ]</span>
     </div>
     <div class="terminal-body" id="terminalBody">{{RAW_LOG}}</div>
   </div>
+
+  <!-- Credits & Attribution -->
+  <footer style="margin-top: 32px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); display: flex; justify-content: center; align-items: center; font-size: 11.5px; color: var(--text-muted); gap: 6px; flex-wrap: wrap; text-align: center;">
+    <span>核心体检引擎基于开源项目</span>
+    <a href="https://github.com/xykt/IPQuality" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: none; font-weight: 700; font-family: var(--font-mono);">xykt/IPQuality</a>
+    <span>· 遵循开源规范 · 特别致敬并感谢原作者 @xykt</span>
+  </footer>
 
 </div>
 
