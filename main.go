@@ -27,7 +27,7 @@ import (
 	"unsafe"
 )
 
-const Version = "1.2.0"
+const Version = "1.3.0"
 
 //go:embed icon_green.ico
 var icoGreenData []byte
@@ -291,6 +291,11 @@ func regReadString(path, name string) (string, bool) {
 
 // attachConsole 让 GUI 子系统的 exe 也能在 cmd/PowerShell 里打印输出（mintty 下无效）
 func attachConsole() {
+	// 原始 stdout 已经有效（管道/重定向）时绝不接管，否则打印会进看不见的控制台
+	if h, _, _ := procGetStdHandle.Call(uintptr(0xFFFFFFF5)); h != 0 {
+		procSetConsoleOutputCP.Call(65001)
+		return
+	}
 	procAttachConsole.Call(^uintptr(0)) // ATTACH_PARENT_PROCESS = (DWORD)-1
 	procSetConsoleOutputCP.Call(65001)
 	hOut, _, _ := procGetStdHandle.Call(uintptr(0xFFFFFFF5)) // STD_OUTPUT_HANDLE=-11
@@ -353,6 +358,7 @@ type Config struct {
 	FlapCount          int      `json:"flap_count"`
 	AlertCooldownMin   int      `json:"alert_cooldown_min"`
 	ServiceCheck       bool     `json:"service_check"`
+	BashPath           string   `json:"bash_path"`
 }
 
 func defaultConfig() Config {
@@ -1187,21 +1193,21 @@ type alertUI struct {
 	closed chan struct{}
 }
 
-func mkFont(h, weight int) uintptr {
+func mkFont(h, weight int, name string) uintptr {
 	r, _, _ := procCreateFontW.Call(
 		uintptr(h), 0, 0, 0, uintptr(weight), 0, 0, 0,
 		DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
-		uintptr(unsafe.Pointer(wp("Microsoft YaHei UI"))))
+		uintptr(unsafe.Pointer(wp(name))))
 	return r
 }
 
 func registerClass() {
 	gClassOnce.Do(func() {
 		procSetProcessDPIAware.Call()
-		fHeader = mkFont(-22, FW_BOLD)
-		fTitle = mkFont(-17, FW_BOLD)
-		fBody = mkFont(-15, FW_NORMAL)
-		fBtn = mkFont(-15, FW_NORMAL)
+		fHeader = mkFont(-22, FW_BOLD, "Microsoft YaHei UI")
+		fTitle = mkFont(-17, FW_BOLD, "Microsoft YaHei UI")
+		fBody = mkFont(-15, FW_NORMAL, "Microsoft YaHei UI")
+		fBtn = mkFont(-15, FW_NORMAL, "Microsoft YaHei UI")
 		brHeader, _, _ = procCreateSolidBrush.Call(rgb(0xB3, 0x26, 0x1E))
 		brBody, _, _ = procCreateSolidBrush.Call(rgb(0x1B, 0x1B, 0x20))
 		gWndProc = syscall.NewCallback(wndProc)
@@ -1632,6 +1638,7 @@ func trayWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 func showTrayMenu(hwnd uintptr) {
 	m, _, _ := procCreatePopupMenu.Call()
 	procAppendMenuW.Call(m, MF_STRING, PM_CHECK, uintptr(unsafe.Pointer(wp("立即体检"))))
+	procAppendMenuW.Call(m, MF_STRING, PM_FULL, uintptr(unsafe.Pointer(wp("全面体检（IP质量）"))))
 	procAppendMenuW.Call(m, MF_STRING, PM_REPORT, uintptr(unsafe.Pointer(wp("复制诊断报告"))))
 	procAppendMenuW.Call(m, MF_STRING, PM_PANEL, uintptr(unsafe.Pointer(wp("状态面板"))))
 	procAppendMenuW.Call(m, MF_SEPARATOR, 0, 0)
@@ -1667,6 +1674,8 @@ func showTrayMenu(hwnd uintptr) {
 		} else {
 			trayBalloon("LadderGuard", "还没有体检数据，稍等一个检测周期")
 		}
+	case PM_FULL:
+		startFullCheck()
 	case PM_PANEL:
 		showStatusPanel()
 	case PM_AUTORUN:
@@ -2152,6 +2161,19 @@ func main() {
 		fmt.Printf("识别到的代理端口: %v（来源: %s）\n", s.AlivePorts, orDash(s.PortSource))
 		fmt.Printf("默认出口: %s\n", geoText(s.DefaultExit))
 		fmt.Printf("代理出口: %s\n", geoText(s.ProxyExit))
+	case "-full":
+		attachConsole()
+		gCfg = &cfg
+		gState = loadState()
+		rep, err := runFullCheck()
+		if err != nil {
+			fmt.Println("全面体检失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println(rep)
+		fmt.Println("-- 报告已保存:", filepath.Join(dataDir(), "fullcheck-report.txt"))
+		showFullReport(rep)
+		waitReportClosed(15 * time.Minute)
 	case "-test":
 		runTestScenario(scenario)
 	case "-install-autostart":

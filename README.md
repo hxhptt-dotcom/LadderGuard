@@ -94,6 +94,7 @@ LadderGuard.exe -install-autostart
 
 ```cmd
 LadderGuard.exe -diag                  :: 手动全量体检，打印报告（在 cmd/PowerShell 里跑）
+LadderGuard-console.exe -full          :: 全面体检（IP质量），命令行跑一份报告
 LadderGuard.exe -test=all              :: 假报警演示，看看弹窗长啥样
 LadderGuard.exe -install-autostart     :: 挂开机自启
 LadderGuard.exe -uninstall-autostart   :: 取消开机自启
@@ -102,6 +103,20 @@ LadderGuard.exe -version               :: 看版本
 
 > `-diag` 和 `-install-autostart` 请在 **cmd / PowerShell / Windows Terminal** 里跑，
 > 别在 Git Bash 里跑（GUI 程序在 mintty 里没有输出）。
+
+## 全面体检（IP 质量报告）
+
+托盘右键 → **全面体检（IP质量）**：调用 [xykt/IPQuality](https://github.com/xykt/IPQuality)（10k+ star 明星项目）对当前出口 IP 做深度体检，约 1 分钟出报告：
+
+- 六大模块：基础信息 / IP 类型 / **风险评分** / 风险因子 / 流媒体&AI 解锁 / 邮局连通性 + 400+ 黑名单
+- 核心价值：**IP 欺诈分数（Fraud Score）**——IPQS/IP2Location 打高风险的节点，就是 AI 服务风控重点照顾的对象，看到高分赶紧换节点
+- 报告窗口可滚动、可一键复制；同时保存到 `%APPDATA%\LadderGuardullcheck-report.txt`
+
+技术说明：
+
+- 体检脚本**运行时自动下载**最新版（上游 AGPL-3.0，本工具不捆绑不分发，仓库 MIT 保持干净）
+- 依赖 Git Bash（装个 Git for Windows 就有）；首次运行自动下载 jq.exe（约 1MB 官方二进制），没有 jq 报告会退化成 Lite 版（缺风险评分）
+- 脚本自动带 `-n` 跳过系统检查（Git Bash 必需）；`dig` 缺失时部分 DNS 类检测受限，不影响主体
 
 ## 配置（可选）
 
