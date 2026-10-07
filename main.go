@@ -75,6 +75,8 @@ var (
 	procGetCursorPos        = user32.NewProc("GetCursorPos")
 	procGetDC               = user32.NewProc("GetDC")
 	procReleaseDC           = user32.NewProc("ReleaseDC")
+	procOpenDesktopW        = user32.NewProc("OpenDesktopW")
+	procSetThreadDesktop    = user32.NewProc("SetThreadDesktop")
 
 	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
 	procGlobalAlloc        = kernel32.NewProc("GlobalAlloc")
@@ -1201,6 +1203,13 @@ func mkFont(h, weight int, name string) uintptr {
 	return r
 }
 
+func attachDefaultDesktop() {
+	hDesk, _, _ := procOpenDesktopW.Call(uintptr(unsafe.Pointer(wp("Default"))), 0, 0, 0x1FF)
+	if hDesk != 0 {
+		procSetThreadDesktop.Call(hDesk)
+	}
+}
+
 func registerClass() {
 	gClassOnce.Do(func() {
 		procSetProcessDPIAware.Call()
@@ -1419,6 +1428,7 @@ func showAlert(issues []Issue, report string) {
 	}
 	go func() {
 		runtime.LockOSThread()
+		attachDefaultDesktop()
 		registerClass()
 		w, h := computeWindowSize(issues)
 		gCurH = h
@@ -1434,14 +1444,16 @@ func showAlert(issues []Issue, report string) {
 		}
 		hInst, _, _ := procGetModuleHandleW.Call(0)
 		ttl := wp("LadderGuard 梯子报警")
-		hwnd, _, _ := procCreateWindowExW.Call(WS_EX_TOPMOST,
+		hwnd, _, err := procCreateWindowExW.Call(WS_EX_TOPMOST,
 			uintptr(unsafe.Pointer(wp("LadderGuardAlert"))), uintptr(unsafe.Pointer(ttl)),
 			WS_POPUP|WS_VISIBLE,
 			uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 			0, 0, hInst, 0)
 		if hwnd == 0 {
+			fmt.Printf("LadderGuardAlert 创建窗口失败: %v\n", err)
 			return
 		}
+		fmt.Printf("LadderGuardAlert 窗口创建成功: hwnd=0x%x\n", hwnd)
 		procShowWindowP.Call(hwnd, SW_SHOW)
 		procSetForegroundWindowP.Call(hwnd)
 		var m MSG
@@ -1837,6 +1849,7 @@ func showStatusPanel() {
 	statMu.Unlock()
 	go func() {
 		runtime.LockOSThread()
+		attachDefaultDesktop()
 		registerClass()
 		statClassOnce.Do(func() {
 			statProcPtr = syscall.NewCallback(statusWndProc)
@@ -1906,6 +1919,7 @@ func showStatusPanel() {
 // runTrayLoop 在主线程跑：隐藏窗口接收托盘消息，退出菜单选中后循环结束、进程退出
 func runTrayLoop() {
 	runtime.LockOSThread()
+	attachDefaultDesktop()
 	registerClass()
 	trayGreen = loadIconFromICO(icoGreenData, 16)
 	trayRed = loadIconFromICO(icoRedData, 16)
@@ -2107,6 +2121,18 @@ func runTestScenario(name string) {
 		waitStatusClosed(10 * time.Minute)
 		return
 	}
+	if name == "report" {
+		repPath := filepath.Join(dataDir(), "fullcheck-report.txt")
+		text := ""
+		if b, err := os.ReadFile(repPath); err == nil && len(b) > 0 {
+			text = string(b)
+		} else {
+			text = "IP质量体检报告 · IPQuality (xykt)\n\n[演示数据] 全面体检正常，未检测到高危标记。"
+		}
+		showFullReport(text)
+		waitReportClosed(10 * time.Minute)
+		return
+	}
 	sc, ok := canned[name]
 	if !ok {
 		// all：把三个场景揉一起
@@ -2175,6 +2201,8 @@ func main() {
 		showFullReport(rep)
 		waitReportClosed(15 * time.Minute)
 	case "-test":
+		attachConsole()
+		fmt.Printf("运行测试场景: %s\n", scenario)
 		runTestScenario(scenario)
 	case "-install-autostart":
 		attachConsole()

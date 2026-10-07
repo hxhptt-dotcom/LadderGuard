@@ -317,6 +317,7 @@ func showFullReport(text string) {
 	repMu.Unlock()
 	go func() {
 		runtime.LockOSThread()
+		attachDefaultDesktop()
 		registerClass()
 		repClassOnce.Do(func() {
 			procSetProcessDPIAware.Call()
@@ -349,20 +350,23 @@ func showFullReport(text string) {
 			y = 0
 		}
 		hInst, _, _ := procGetModuleHandleW.Call(0)
-		hwnd, _, _ := procCreateWindowExW.Call(WS_EX_TOPMOST,
+		hwnd, _, err := procCreateWindowExW.Call(WS_EX_TOPMOST,
 			uintptr(unsafe.Pointer(wp("LadderGuardReport"))), uintptr(unsafe.Pointer(wp("LadderGuard 全面体检报告"))),
 			WS_POPUP|WS_VISIBLE,
 			uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 			0, 0, hInst, 0)
 		if hwnd == 0 {
+			fmt.Printf("LadderGuardReport 创建窗口失败: %v\n", err)
 			return
 		}
+		fmt.Printf("LadderGuardReport 窗口创建成功: hwnd=0x%x\n", hwnd)
 		procShowWindowP.Call(hwnd, SW_SHOW)
 		procSetForegroundWindowP.Call(hwnd)
 		var m MSG
 		for {
-			r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
+			r, _, err := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
 			if r == 0 || r == ^uintptr(0) {
+				fmt.Printf("GetMessage 循环退出: r=0x%x, err=%v\n", r, err)
 				break
 			}
 			procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
