@@ -3,4 +3,5 @@ config.json
 *.png
 *.log
 PROGRESS.md
+report.html
 !docs/*.png

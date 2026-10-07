@@ -313,6 +313,7 @@ func attachConsole() {
 // ---------------- 剪贴板 ----------------
 
 func SetClipboardText(text string) bool {
+	attachDefaultDesktop()
 	u := utf16.Encode([]rune(text))
 	u = append(u, 0)
 	n := len(u) * 2
