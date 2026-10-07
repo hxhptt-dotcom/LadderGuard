@@ -11,46 +11,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 )
 
 const (
-	PM_FULL    = 6
-	ID_REPCOPY = 21
-	ID_REPCLOSE = 23
-
-	ES_MULTILINE      = 0x0004
-	ES_AUTOVSCROLL    = 0x0040
-	ES_READONLY       = 0x0800
-	WS_VSCROLL        = 0x00200000
-	WM_CTLCOLOREDIT   = 0x0133
-	WM_CTLCOLORSTATIC = 0x0138
+	PM_FULL = 6
 )
 
 var (
-	procSetFocusP   = user32.NewProc("SetFocus")
-	procSetBkColorG = gdi32.NewProc("SetBkColor")
-
 	fullMu      sync.Mutex
 	fullRunning bool
 
-	gReportText  string
-	gReportTime  string
-	gReportEdit  uintptr
-	gReportBtnCopy uintptr
+	gReportText string
+	gReportTime string
 
-	repProcPtr   uintptr
-	repClassOnce sync.Once
-	repMu        sync.Mutex
-	repClosed    chan struct{}
-
-	fMono  uintptr
-	brEdit uintptr
+	repMu     sync.Mutex
+	repClosed chan struct{}
 )
 
 // findBash 找 Git Bash：config 指定 > PATH > 常见安装位置
@@ -237,140 +215,36 @@ func waitReportClosed(timeout time.Duration) {
 	}
 }
 
-// ---- 报告窗口 ----
 
-func reportWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
-	switch msg {
-	case WM_CREATE:
-		w, h := 680, 600
-		hInst, _, _ := procGetModuleHandleW.Call(0)
-		edit, _, _ := procCreateWindowExW.Call(0,
-			uintptr(unsafe.Pointer(wp("EDIT"))), 0,
-			WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_TABSTOP|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
-			16, 52, uintptr(w-32), uintptr(h-104), hwnd, 7, hInst, 0)
-		gReportEdit = edit
-		procSendMessageW.Call(edit, WM_SETFONT, fMono, 1)
-		repMu.Lock()
-		txt := gReportText
-		repMu.Unlock()
-		procSetWindowTextW.Call(edit, uintptr(unsafe.Pointer(wp(strings.ReplaceAll(txt, "\n", "\r\n")))))
-		gReportBtnCopy = mkButton(hwnd, ID_REPCOPY, "复制报告", 20, h-46, 150, 34)
-		btnClose := mkButton(hwnd, ID_REPCLOSE, "关 闭", w-110, h-46, 90, 34)
-		procSendMessageW.Call(gReportBtnCopy, WM_SETFONT, fBtn, 1)
-		procSendMessageW.Call(btnClose, WM_SETFONT, fBtn, 1)
-		procSetFocusP.Call(edit)
-		return 0
-	case WM_COMMAND:
-		switch wparam & 0xffff {
-		case ID_REPCOPY:
-			repMu.Lock()
-			txt := gReportText
-			repMu.Unlock()
-			SetClipboardText(txt)
-			procSetWindowTextW.Call(gReportBtnCopy, uintptr(unsafe.Pointer(wp("✓ 已复制"))))
-		case ID_REPCLOSE:
-			procDestroyWindow.Call(hwnd)
-		}
-		return 0
-	case WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC:
-		procSetTextColorG.Call(wparam, rgb(0xD8, 0xD8, 0xD8))
-		procSetBkMode.Call(wparam, TRANSPARENT)
-		procSetBkColorG.Call(wparam, rgb(0x12, 0x12, 0x16))
-		return brEdit
-	case WM_PAINT:
-		var ps PAINTSTRUCT
-		hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
-		defer procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
-		procSetBkMode.Call(hdc, TRANSPARENT)
-		procSetTextColorG.Call(hdc, rgb(255, 255, 255))
-		procSelectObject.Call(hdc, fTitle)
-		title := "全面体检报告 · IPQuality"
-		if gReportTime != "" {
-			title += " · " + gReportTime
-		}
-		r := RECT{20, 0, 680 - 20, 44}
-		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(wp(title))), uintptr(utf16Count(title)),
-			uintptr(unsafe.Pointer(&r)), DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
-		return 0
-	case WM_DESTROY:
-		repMu.Lock()
-		if repClosed != nil {
-			close(repClosed)
-			repClosed = nil
-		}
-		repMu.Unlock()
-		procPostQuitMessage.Call(0)
-		return 0
-	}
-	r, _, _ := procDefWindowProcW.Call(hwnd, msg, wparam, lparam)
-	return r
-}
 
-// showFullReport 打开报告窗口（等宽字体、可滚动、可复制）
+// showFullReport 生成高颜值自包含 HTML 报告并在系统默认浏览器中唤起打开
 func showFullReport(text string) {
 	repMu.Lock()
 	gReportText = text
 	gReportTime = time.Now().Format("15:04:05")
-	if repClosed == nil {
-		repClosed = make(chan struct{})
+	if repClosed != nil {
+		select {
+		case <-repClosed:
+		default:
+			close(repClosed)
+		}
 	}
+	repClosed = make(chan struct{})
+	close(repClosed)
 	repMu.Unlock()
-	go func() {
-		runtime.LockOSThread()
-		attachDefaultDesktop()
-		registerClass()
-		repClassOnce.Do(func() {
-			procSetProcessDPIAware.Call()
-			fMono = mkFont(-14, FW_NORMAL, "NSimSun")
-			brEdit, _, _ = procCreateSolidBrush.Call(rgb(0x12, 0x12, 0x16))
-			repProcPtr = syscall.NewCallback(reportWndProc)
-			hInst, _, _ := procGetModuleHandleW.Call(0)
-			cursor, _, _ := procLoadCursorW.Call(0, IDC_ARROW)
-			name := wp("LadderGuardReport")
-			wc := WNDCLASSEXW{
-				CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
-				LpfnWndProc:   repProcPtr,
-				HInstance:     hInst,
-				HCursor:       cursor,
-				HbrBackground: brBody,
-				LpszClassName: uintptr(unsafe.Pointer(name)),
-			}
-			procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
-			runtime.KeepAlive(name)
-		})
-		w, h := 680, 600
-		sx, _, _ := procGetSystemMetrics.Call(SM_CXSCREEN)
-		sy, _, _ := procGetSystemMetrics.Call(SM_CYSCREEN)
-		x := int(sx) - w - 24
-		y := int(sy) - h - 72
-		if x < 0 {
-			x = 0
-		}
-		if y < 0 {
-			y = 0
-		}
-		hInst, _, _ := procGetModuleHandleW.Call(0)
-		hwnd, _, err := procCreateWindowExW.Call(WS_EX_TOPMOST,
-			uintptr(unsafe.Pointer(wp("LadderGuardReport"))), uintptr(unsafe.Pointer(wp("LadderGuard 全面体检报告"))),
-			WS_POPUP|WS_VISIBLE,
-			uintptr(x), uintptr(y), uintptr(w), uintptr(h),
-			0, 0, hInst, 0)
-		if hwnd == 0 {
-			fmt.Printf("LadderGuardReport 创建窗口失败: %v\n", err)
-			return
-		}
-		fmt.Printf("LadderGuardReport 窗口创建成功: hwnd=0x%x\n", hwnd)
-		procShowWindowP.Call(hwnd, SW_SHOW)
-		procSetForegroundWindowP.Call(hwnd)
-		var m MSG
-		for {
-			r, _, err := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
-			if r == 0 || r == ^uintptr(0) {
-				fmt.Printf("GetMessage 循环退出: r=0x%x, err=%v\n", r, err)
-				break
-			}
-			procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-			procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
-		}
-	}()
+
+	// 自动预先复制一份大白话 AI 诊断给剪贴板
+	p := parseFullReport(text)
+	aiSummary := fmt.Sprintf("【LadderGuard 体检总结】%s (防封指数 %d/100)\n出口 IP：%s (%s - %s)\n风控评分：IPQS欺诈分 %d | Scamalytics %d | IP2Location %d\nClaude 建议：%s\nChatGPT 建议：%s\n总评：%s",
+		p.BadgeText, p.ScoreTotal, p.IP, p.Country, p.Org, p.IPQSScore, p.ScamalyticsScore, p.IP2LocationScore, p.ClaudeAdvice, p.GPTAdvice, p.Summary)
+	SetClipboardText(aiSummary)
+
+	htmlPath, err := saveAndOpenHTMLReport(text)
+	if err != nil {
+		logf("生成 HTML 报告失败: %v", err)
+		fmt.Printf("生成 HTML 报告失败: %v\n", err)
+	} else {
+		logf("全面体检 HTML 报告已在浏览器打开: %s", htmlPath)
+		fmt.Printf("全面体检 HTML 报告已在浏览器打开: %s\n", htmlPath)
+	}
 }
