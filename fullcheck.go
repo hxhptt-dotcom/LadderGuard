@@ -31,25 +31,49 @@ var (
 	repClosed chan struct{}
 )
 
-// findBash 找 Git Bash：config 指定 > PATH > 常见安装位置
+// findBash 优先找真实的 Git for Windows (MSYS2) bash，严禁误用 Windows WSL 的 system32\bash.exe
 func findBash() (string, error) {
+	// 1. 配置指定
 	if gCfg != nil && strings.TrimSpace(gCfg.BashPath) != "" {
 		if st, err := os.Stat(gCfg.BashPath); err == nil && !st.IsDir() {
 			return gCfg.BashPath, nil
 		}
 	}
-	if p, err := exec.LookPath("bash"); err == nil {
-		return p, nil
+	// 2. 根据 git.exe 反推 Git 安装目录
+	if gitPath, err := exec.LookPath("git"); err == nil {
+		dir := filepath.Dir(gitPath)
+		for _, sub := range []string{
+			filepath.Join(dir, "..", "bin", "bash.exe"),
+			filepath.Join(dir, "..", "usr", "bin", "bash.exe"),
+			filepath.Join(dir, "bash.exe"),
+		} {
+			clean := filepath.Clean(sub)
+			if st, err := os.Stat(clean); err == nil && !st.IsDir() {
+				return clean, nil
+			}
+		}
 	}
+	// 3. 常见盘符安装位置 (D盘、C盘、E盘)
 	cands := []string{
+		`D:\Program Files\Git\bin\bash.exe`,
+		`D:\Program Files\Git\usr\bin\bash.exe`,
 		`C:\Program Files\Git\bin\bash.exe`,
 		`C:\Program Files\Git\usr\bin\bash.exe`,
 		`C:\Program Files (x86)\Git\bin\bash.exe`,
+		`D:\Program Files (x86)\Git\bin\bash.exe`,
+		`E:\Program Files\Git\bin\bash.exe`,
 		filepath.Join(os.Getenv("LOCALAPPDATA"), `Programs\Git\bin\bash.exe`),
 	}
 	for _, c := range cands {
 		if st, err := os.Stat(c); err == nil && !st.IsDir() {
 			return c, nil
+		}
+	}
+	// 4. PATH 中的 bash（严格排除 system32 和 WindowsApps 的 WSL 启动器）
+	if p, err := exec.LookPath("bash"); err == nil {
+		low := strings.ToLower(p)
+		if !strings.Contains(low, "system32") && !strings.Contains(low, "windowsapps") {
+			return p, nil
 		}
 	}
 	return "", fmt.Errorf("未找到 Git Bash，请先安装 Git for Windows")
@@ -156,8 +180,8 @@ func runFullCheck() (string, error) {
 	runHiddenCmd(cmd)
 	binDir := filepath.Join(dataDir(), "bin")
 	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	cmd.Stdin = nil
-	out, rerr := cmd.Output()
+	logf("执行全面体检: bash=%s script=%s", bashPath, scriptPath)
+	out, rerr := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return "", fmt.Errorf("超时（超过 3 分钟已终止）")
 	}
